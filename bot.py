@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN и OPENAI_API_KEY должны быть заданы в .env")
+    raise RuntimeError("Нужно задать TELEGRAM_BOT_TOKEN и OPENAI_API_KEY в переменных окружения")
 
 openai.api_key = OPENAI_API_KEY
 
@@ -27,11 +27,11 @@ FREE_MESSAGE_LIMIT = 20
 dp = Dispatcher()
 user_state = defaultdict(lambda: {"messages_left": FREE_MESSAGE_LIMIT})
 
-SYSTEM_PROMPT = """
-Ты — «Адвокат X», строгий юридический ИИ-консультант по законодательству РФ.
-Отвечай кратко, по делу, официальным официально-деловым стилем.
-Не давай советов по обходу закона или незаконным действиям.
-"""
+SYSTEM_PROMPT = (
+    "Ты — «Адвокат X», строгий, точный и квалифицированный юрист по законодательству РФ. "
+    "Отвечай официально-деловым стилем, по существу, без воды. "
+    "Не давай советов по обходу закона или незаконным действиям. "
+)
 
 
 async def ask_ai_lawyer(text: str) -> str:
