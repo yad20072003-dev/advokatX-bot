@@ -87,39 +87,57 @@ async def ask_document_text(question: str, analysis: str) -> str:
 
 
 def kb_main() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(text="Обычная консультация", callback_data="mode_basic"))
-    kb.add(InlineKeyboardButton(
-        text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)",
-        callback_data="mode_individual"))
-    return kb
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Обычная консультация", callback_data="mode_basic")],
+            [InlineKeyboardButton(
+                text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)",
+                callback_data="mode_individual"
+            )]
+        ]
+    )
 
 
 def kb_follow() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(
-        text=f"Подготовить документ ({DOC_BASIC_PRICE_RUB} ₽)",
-        callback_data="doc_basic"))
-    kb.add(InlineKeyboardButton(
-        text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)",
-        callback_data="mode_individual"))
-    return kb
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text=f"Подготовить документ ({DOC_BASIC_PRICE_RUB} ₽)",
+                callback_data="doc_basic"
+            )],
+            [InlineKeyboardButton(
+                text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)",
+                callback_data="mode_individual"
+            )]
+        ]
+    )
 
 
 def kb_doc_free() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(text="Подготовить документ (бесплатно)", callback_data="doc_free"))
-    return kb
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="Подготовить документ (бесплатно)",
+                callback_data="doc_free"
+            )]
+        ]
+    )
 
 
 def kb_limit_reached() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(text="Пополнить сообщения", callback_data="buy_messages"))
-    kb.add(InlineKeyboardButton(
-        text="Подписка (30 сообщений + документы)", callback_data="buy_subscription"))
-    kb.add(InlineKeyboardButton(
-        text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)", callback_data="mode_individual"))
-    return kb
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Пополнить сообщения", callback_data="buy_messages")],
+            [InlineKeyboardButton(
+                text="Подписка (30 сообщений + документы)",
+                callback_data="buy_subscription"
+            )],
+            [InlineKeyboardButton(
+                text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE_RUB} ₽)",
+                callback_data="mode_individual"
+            )]
+        ]
+    )
 
 
 def make_docx(text: str, uid: int) -> str:
@@ -193,10 +211,13 @@ async def cb_doc_free(call: CallbackQuery):
 
 @dp.callback_query(F.data == "buy_messages")
 async def cb_buy_messages(call: CallbackQuery):
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(text="5 сообщений — 99 ₽", callback_data="buy_pack_5"))
-    kb.add(InlineKeyboardButton(text="15 сообщений — 199 ₽", callback_data="buy_pack_15"))
-    kb.add(InlineKeyboardButton(text="40 сообщений — 399 ₽", callback_data="buy_pack_40"))
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="5 сообщений — 99 ₽", callback_data="buy_pack_5")],
+            [InlineKeyboardButton(text="15 сообщений — 199 ₽", callback_data="buy_pack_15")],
+            [InlineKeyboardButton(text="40 сообщений — 399 ₽", callback_data="buy_pack_40")]
+        ]
+    )
     await call.message.answer("Выберите пакет сообщений:", reply_markup=kb)
 
 
