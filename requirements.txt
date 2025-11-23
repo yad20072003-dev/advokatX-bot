@@ -5,3 +5,4 @@ python-docx==1.1.0
 yookassa==3.0.0
 fastapi==0.110.0
 uvicorn==0.29.0
+gunicorn==21.2.0
