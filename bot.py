@@ -10,8 +10,7 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    FSInputFile
+    InlineKeyboardButton
 )
 from dotenv import load_dotenv
 import openai
@@ -25,7 +24,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 PAY_RETURN_URL = os.getenv("PAY_RETURN_URL")
-BOT_USERNAME = os.getenv("BOT_USERNAME")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 openai.api_key = OPENAI_API_KEY
 Configuration.account_id = SHOP_ID
@@ -56,14 +55,12 @@ users = defaultdict(lambda: {
 
 SYSTEM_PROMPT = """
 Ты — «Адвокат X», профессиональный юридический помощник.
-Ты отвечаешь официально, по закону РФ, чётко и без лишней воды.
-Ты не являешься адвокатом или представителем в суде.
+Отвечай строго по законам РФ, официально, точно и без воды.
 """
 
 
 async def ask_short(text):
-    r = await asyncio.to_thread(
-        openai.ChatCompletion.create,
+    r = await asyncio.to_thread(openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -74,12 +71,11 @@ async def ask_short(text):
 
 
 async def ask_full(text):
-    r = await asyncio.to_thread(
-        openai.ChatCompletion.create,
+    r = await asyncio.to_thread(openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Сделай подробный анализ ситуации:\n{text}"}
+            {"role": "user", "content": f"Подробно разберись:\n{text}"}
         ]
     )
     return r["choices"][0]["message"]["content"].strip()
@@ -105,9 +101,9 @@ def kb_main():
 
 def kb_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Пополнить 5 сообщений — {PACK_5} ₽", callback_data="buy5")],
-        [InlineKeyboardButton(text=f"Пополнить 10 сообщений — {PACK_10} ₽", callback_data="buy10")],
-        [InlineKeyboardButton(text=f"Пополнить 20 сообщений — {PACK_20} ₽", callback_data="buy20")],
+        [InlineKeyboardButton(text=f"5 сообщений — {PACK_5} ₽", callback_data="buy5")],
+        [InlineKeyboardButton(text=f"10 сообщений — {PACK_10} ₽", callback_data="buy10")],
+        [InlineKeyboardButton(text=f"20 сообщений — {PACK_20} ₽", callback_data="buy20")],
         [InlineKeyboardButton(text=f"Индивидуальная консультация — {INDIVIDUAL_PRICE} ₽", callback_data="start_individual")]
     ])
 
@@ -121,8 +117,11 @@ def need_doc_button():
 def create_payment(amount, description, uid, service):
     payment = Payment.create({
         "amount": {
-            "value": "%.2f" % float(amount),
+            "value": f"{amount:.2f}",
             "currency": "RUB"
+        },
+        "payment_method_data": {
+            "type": "bank_card"
         },
         "confirmation": {
             "type": "redirect",
@@ -132,7 +131,7 @@ def create_payment(amount, description, uid, service):
         "description": description,
         "metadata": {
             "user_id": str(uid),
-            "service": str(service)
+            "service": service
         }
     })
     return payment.confirmation.confirmation_url
@@ -148,7 +147,6 @@ async def start(message: Message):
 
     await message.answer(
         f"Здравствуйте! Я — Адвокат X.\n"
-        f"Я помогу разобраться в вашей юридической ситуации.\n\n"
         f"Бесплатный лимит: {u['limit']} сообщений.\n"
         f"Выберите режим или опишите проблему.",
         reply_markup=kb_main()
@@ -171,7 +169,7 @@ async def start_individual(call: CallbackQuery):
     u = users[call.from_user.id]
 
     if u["consult_active"]:
-        await call.message.answer("У вас уже активна индивидуальная консультация.")
+        await call.message.answer("Индивидуальная консультация уже активна.")
         return
 
     url = create_payment(
@@ -182,8 +180,8 @@ async def start_individual(call: CallbackQuery):
     )
 
     await call.message.answer(
-        "После оплаты я проведу вас до полного решения вопроса.\n"
-        "Пожалуйста, оплатите консультацию:",
+        "После оплаты я буду вести вас до полного решения ситуации.\n"
+        "Пожалуйста, оплатите:",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
         )
@@ -209,34 +207,25 @@ async def paid_doc(call: CallbackQuery):
 @dp.callback_query(F.data == "buy5")
 async def buy5(call: CallbackQuery):
     url = create_payment(PACK_5, "5 messages", call.from_user.id, "pack5")
-    await call.message.answer(
-        "Оплатите пакет:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-        )
-    )
+    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+    ))
 
 
 @dp.callback_query(F.data == "buy10")
 async def buy10(call: CallbackQuery):
     url = create_payment(PACK_10, "10 messages", call.from_user.id, "pack10")
-    await call.message.answer(
-        "Оплатите пакет:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-        )
-    )
+    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+    ))
 
 
 @dp.callback_query(F.data == "buy20")
 async def buy20(call: CallbackQuery):
     url = create_payment(PACK_20, "20 messages", call.from_user.id, "pack20")
-    await call.message.answer(
-        "Оплатите пакет:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-        )
-    )
+    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+    ))
 
 
 @dp.message(F.text)
@@ -275,6 +264,7 @@ async def message_handler(message: Message):
 
 
 async def main():
+    await bot.set_webhook(WEBHOOK_URL)
     await dp.start_polling(bot)
 
 
