@@ -1,36 +1,42 @@
 import os
-import json
-from flask import Flask, request
-from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from yookassa import Configuration
+from aiogram import Bot
 
-load_dotenv()
+app = FastAPI()
 
-SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
+SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 
-app = Flask(__name__)
+Configuration.account_id = SHOP_ID
+Configuration.secret_key = SECRET_KEY
 
-users = {}
+bot = Bot(token=BOT_TOKEN)
+user_payments = {}
 
-@app.post("/yookassa")
-def yookassa_webhook():
-    payload = request.json
 
-    if not payload:
-        return {"status": "no payload"}, 400
+@app.post("/yookassa/webhook")
+async def yookassa_webhook(request: Request):
+    body = await request.json()
 
-    event = payload.get("event")
-    obj = payload.get("object", {})
-    payment_id = obj.get("id")
+    event = body.get("event")
+    obj = body.get("object", {})
 
-    metadata = obj.get("metadata", {})
-    user_id = metadata.get("user_id")
-    action = metadata.get("action")
+    if event == "payment.succeeded":
+        metadata = obj.get("metadata", {})
+        uid = metadata.get("user_id")
+        payment_type = metadata.get("type")
 
-    if event == "payment.succeeded" and user_id and action:
-        users[user_id] = action
+        if payment_type == "doc":
+            await bot.send_message(uid, "Оплата получена. Подготавливаю документ…")
+        elif payment_type == "indiv":
+            await bot.send_message(uid, "Оплата получена. Индивидуальная консультация активирована.")
+        elif payment_type == "pack":
+            await bot.send_message(uid, "Пакет сообщений активирован.")
+        elif payment_type == "sub":
+            await bot.send_message(uid, "Подписка активирована.")
+        else:
+            await bot.send_message(uid, "Платёж успешно получен.")
 
     return {"status": "ok"}
-    
-if name == "__main__":
-    app.run(host="0.0.0.0", port=5000)
