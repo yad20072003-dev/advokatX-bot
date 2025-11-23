@@ -62,7 +62,8 @@ SYSTEM_PROMPT = """
 
 
 async def ask_short(text):
-    r = await asyncio.to_thread(openai.ChatCompletion.create,
+    r = await asyncio.to_thread(
+        openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -73,7 +74,8 @@ async def ask_short(text):
 
 
 async def ask_full(text):
-    r = await asyncio.to_thread(openai.ChatCompletion.create,
+    r = await asyncio.to_thread(
+        openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -119,7 +121,7 @@ def need_doc_button():
 def create_payment(amount, description, uid, service):
     payment = Payment.create({
         "amount": {
-            "value": f"{amount:.2f}",
+            "value": "%.2f" % float(amount),
             "currency": "RUB"
         },
         "confirmation": {
@@ -129,8 +131,8 @@ def create_payment(amount, description, uid, service):
         "capture": True,
         "description": description,
         "metadata": {
-            "user_id": uid,
-            "service": service
+            "user_id": str(uid),
+            "service": str(service)
         }
     })
     return payment.confirmation.confirmation_url
@@ -207,25 +209,34 @@ async def paid_doc(call: CallbackQuery):
 @dp.callback_query(F.data == "buy5")
 async def buy5(call: CallbackQuery):
     url = create_payment(PACK_5, "5 messages", call.from_user.id, "pack5")
-    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-    ))
+    await call.message.answer(
+        "Оплатите пакет:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+        )
+    )
 
 
 @dp.callback_query(F.data == "buy10")
 async def buy10(call: CallbackQuery):
     url = create_payment(PACK_10, "10 messages", call.from_user.id, "pack10")
-    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-    ))
+    await call.message.answer(
+        "Оплатите пакет:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+        )
+    )
 
 
 @dp.callback_query(F.data == "buy20")
 async def buy20(call: CallbackQuery):
     url = create_payment(PACK_20, "20 messages", call.from_user.id, "pack20")
-    await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
-    ))
+    await call.message.answer(
+        "Оплатите пакет:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+        )
+    )
 
 
 @dp.message(F.text)
@@ -269,3 +280,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
