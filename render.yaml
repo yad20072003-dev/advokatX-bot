@@ -1,8 +1,12 @@
 services:
   - type: worker
-    name: advokatx-bot
+    name: advokatX-bot
     env: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    autoDeploy: true
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+    envVars:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      PAY_RETURN_URL: ${PAY_RETURN_URL}
