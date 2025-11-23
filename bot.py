@@ -6,12 +6,7 @@ from collections import defaultdict
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 import openai
 from docx import Document
@@ -24,7 +19,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 PAY_RETURN_URL = os.getenv("PAY_RETURN_URL")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 openai.api_key = OPENAI_API_KEY
 Configuration.account_id = SHOP_ID
@@ -32,8 +26,8 @@ Configuration.secret_key = SECRET_KEY
 
 logging.basicConfig(level=logging.INFO)
 
-dp = Dispatcher()
 bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 FREE_LIMIT = 10
 INDIVIDUAL_PRICE = 199
@@ -46,21 +40,22 @@ users = defaultdict(lambda: {
     "limit": FREE_LIMIT,
     "last_reset": datetime.now(),
     "mode": "free",
-    "last_q": None,
-    "last_a": None,
     "consult_active": False,
     "consult_until": None,
-    "consult_msgs": 0
+    "consult_msgs": 0,
+    "last_q": None,
+    "last_a": None
 })
 
-SYSTEM_PROMPT = """
-Ты — «Адвокат X», профессиональный юридический помощник.
-Отвечай строго по законам РФ, официально, точно и без воды.
-"""
-
+SYSTEM_PROMPT = (
+    "Ты — «Адвокат X», профессиональный юридический помощник. "
+    "Отвечаешь по закону РФ, официально, чётко и без лишней воды. "
+    "Ты не являешься адвокатом или представителем в суде."
+)
 
 async def ask_short(text):
-    r = await asyncio.to_thread(openai.ChatCompletion.create,
+    r = await asyncio.to_thread(
+        openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -71,11 +66,12 @@ async def ask_short(text):
 
 
 async def ask_full(text):
-    r = await asyncio.to_thread(openai.ChatCompletion.create,
+    r = await asyncio.to_thread(
+        openai.ChatCompletion.create,
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Подробно разберись:\n{text}"}
+            {"role": "user", "content": f"Сделай подробный анализ:\n{text}"}
         ]
     )
     return r["choices"][0]["message"]["content"].strip()
@@ -91,12 +87,11 @@ def make_doc(text, uid):
 
 
 def kb_main():
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Обычная консультация", callback_data="mode_basic")],
-        [InlineKeyboardButton(text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE} ₽)", callback_data="start_individual")],
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Обычная консультация", callback_data="basic")],
+        [InlineKeyboardButton(text=f"Индивидуальная консультация ({INDIVIDUAL_PRICE} ₽)", callback_data="individual")],
         [InlineKeyboardButton(text="Меню", callback_data="menu")]
     ])
-    return kb
 
 
 def kb_menu():
@@ -104,35 +99,23 @@ def kb_menu():
         [InlineKeyboardButton(text=f"5 сообщений — {PACK_5} ₽", callback_data="buy5")],
         [InlineKeyboardButton(text=f"10 сообщений — {PACK_10} ₽", callback_data="buy10")],
         [InlineKeyboardButton(text=f"20 сообщений — {PACK_20} ₽", callback_data="buy20")],
-        [InlineKeyboardButton(text=f"Индивидуальная консультация — {INDIVIDUAL_PRICE} ₽", callback_data="start_individual")]
+        [InlineKeyboardButton(text=f"Индивидуальная консультация — {INDIVIDUAL_PRICE} ₽", callback_data="individual")]
     ])
 
 
-def need_doc_button():
+def kb_doc():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Подготовить документ — {DOC_PRICE} ₽", callback_data="paid_doc")]
+        [InlineKeyboardButton(text=f"Подготовить документ — {DOC_PRICE} ₽", callback_data="doc")]
     ])
 
 
-def create_payment(amount, description, uid, service):
+def payment_url(amount, description, uid, service):
     payment = Payment.create({
-        "amount": {
-            "value": f"{amount:.2f}",
-            "currency": "RUB"
-        },
-        "payment_method_data": {
-            "type": "bank_card"
-        },
-        "confirmation": {
-            "type": "redirect",
-            "return_url": PAY_RETURN_URL
-        },
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+        "confirmation": {"type": "redirect", "return_url": PAY_RETURN_URL},
         "capture": True,
         "description": description,
-        "metadata": {
-            "user_id": str(uid),
-            "service": service
-        }
+        "metadata": {"user_id": uid, "service": service}
     })
     return payment.confirmation.confirmation_url
 
@@ -147,55 +130,44 @@ async def start(message: Message):
 
     await message.answer(
         f"Здравствуйте! Я — Адвокат X.\n"
-        f"Бесплатный лимит: {u['limit']} сообщений.\n"
-        f"Выберите режим или опишите проблему.",
+        f"Ваш дневной лимит: {u['limit']} сообщений.\n\n"
+        f"Опишите ситуацию или выберите режим:",
         reply_markup=kb_main()
     )
 
 
-@dp.callback_query(F.data == "mode_basic")
-async def mode_basic(call: CallbackQuery):
+@dp.callback_query(F.data == "basic")
+async def basic(call: CallbackQuery):
     users[call.from_user.id]["mode"] = "free"
-    await call.message.answer("Режим обычных консультаций включён.")
+    await call.message.answer("Обычный режим включён.")
 
 
 @dp.callback_query(F.data == "menu")
 async def menu(call: CallbackQuery):
-    await call.message.answer("Меню услуг:", reply_markup=kb_menu())
+    await call.message.answer("Выберите услугу:", reply_markup=kb_menu())
 
 
-@dp.callback_query(F.data == "start_individual")
-async def start_individual(call: CallbackQuery):
+@dp.callback_query(F.data == "individual")
+async def individual(call: CallbackQuery):
     u = users[call.from_user.id]
 
     if u["consult_active"]:
-        await call.message.answer("Индивидуальная консультация уже активна.")
+        await call.message.answer("У вас уже идет индивидуальная консультация.")
         return
 
-    url = create_payment(
-        INDIVIDUAL_PRICE,
-        "Individual consultation",
-        call.from_user.id,
-        "individual"
-    )
+    url = payment_url(INDIVIDUAL_PRICE, "individual consultation", call.from_user.id, "individual")
 
     await call.message.answer(
-        "После оплаты я буду вести вас до полного решения ситуации.\n"
-        "Пожалуйста, оплатите:",
+        "Оплатите индивидуальную консультацию:",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
         )
     )
 
 
-@dp.callback_query(F.data == "paid_doc")
-async def paid_doc(call: CallbackQuery):
-    url = create_payment(
-        DOC_PRICE,
-        "Document",
-        call.from_user.id,
-        "doc"
-    )
+@dp.callback_query(F.data == "doc")
+async def doc(call: CallbackQuery):
+    url = payment_url(DOC_PRICE, "document", call.from_user.id, "doc")
     await call.message.answer(
         "Оплатите подготовку документа:",
         reply_markup=InlineKeyboardMarkup(
@@ -206,7 +178,7 @@ async def paid_doc(call: CallbackQuery):
 
 @dp.callback_query(F.data == "buy5")
 async def buy5(call: CallbackQuery):
-    url = create_payment(PACK_5, "5 messages", call.from_user.id, "pack5")
+    url = payment_url(PACK_5, "5 messages", call.from_user.id, "pack5")
     await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
     ))
@@ -214,7 +186,7 @@ async def buy5(call: CallbackQuery):
 
 @dp.callback_query(F.data == "buy10")
 async def buy10(call: CallbackQuery):
-    url = create_payment(PACK_10, "10 messages", call.from_user.id, "pack10")
+    url = payment_url(PACK_10, "10 messages", call.from_user.id, "pack10")
     await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
     ))
@@ -222,7 +194,7 @@ async def buy10(call: CallbackQuery):
 
 @dp.callback_query(F.data == "buy20")
 async def buy20(call: CallbackQuery):
-    url = create_payment(PACK_20, "20 messages", call.from_user.id, "pack20")
+    url = payment_url(PACK_20, "20 messages", call.from_user.id, "pack20")
     await call.message.answer("Оплатите пакет:", reply_markup=InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
     ))
@@ -239,10 +211,7 @@ async def message_handler(message: Message):
 
     if u["consult_active"]:
         ans = await ask_full(message.text)
-        u["last_q"] = message.text
-        u["last_a"] = ans
-        u["consult_msgs"] += 1
-        await message.answer(ans, reply_markup=need_doc_button())
+        await message.answer(ans, reply_markup=kb_doc())
         return
 
     if u["limit"] <= 0:
@@ -254,20 +223,18 @@ async def message_handler(message: Message):
 
     u["limit"] -= 1
     ans = await ask_short(message.text)
-    u["last_q"] = message.text
-    u["last_a"] = ans
 
     await message.answer(
-        f"{ans}\n\nОсталось: {u['limit']} сообщений.",
+        f"{ans}\n\nОсталось {u['limit']} сообщений.",
         reply_markup=kb_menu()
     )
 
 
 async def main():
-    await bot.set_webhook(WEBHOOK_URL)
-    await dp.start_polling(bot)
+    await bot.set_webhook("https://advokatx-bot-2i8n.onrender.com/webhook")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
