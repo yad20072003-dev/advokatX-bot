@@ -1,5 +1,6 @@
 aiogram==3.4.1
-openai==0.28.1
 python-dotenv==1.0.1
+openai==1.14.1
 python-docx==1.1.0
-yookassa==3.8.0
+yookassa==3.7.10
+
