@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import json
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -733,7 +732,7 @@ async def buy20(call: CallbackQuery):
     await create_invoice(
         uid,
         "Пакет 20 сообщений",
-        "Дополнительно 20 сообщений к вашему лимиту.",
+        "Дополнительные 20 сообщений к вашему лимиту.",
         "pack20",
         PRICE_PACK20,
     )
@@ -1009,6 +1008,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
