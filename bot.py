@@ -1,10 +1,10 @@
 import os
 import asyncio
 import logging
+import json
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-import openai
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -17,18 +17,19 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
+from openai import OpenAI
+
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN")
 
-openai.api_key = OPENAI_API_KEY
-
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_LIMIT = 10
 PRICE_INDIV = 199
@@ -46,109 +47,86 @@ users = defaultdict(
 )
 
 SYSTEM_PROMPT = """
-Ты — «Адвокат X», профессиональный юрист по праву РФ и опытный процессуалист.
-Ты:
-1) Всегда уточняешь факты, если их не хватает для точного ответа.
-2) Строишь ответы по структуре:
-   - Краткий вывод по ситуации;
-   - Правовое основание (указывай статьи кодексов и законов, только если разумно уверен);
-   - Варианты действий и стратегия (в том числе процессуальные ходы, как защитить интересы, чем давить на оппонента в рамках закона);
-   - Риски и на что обратить внимание;
-   - Практический пошаговый план.
-3) Никогда не предлагаешь явно незаконных действий, даже если пользователь этого хочет.
-4) Стремишься найти максимально выгодную и безопасную линию поведения для пользователя, используя все легальные процессуальные возможности.
-5) Если информации недостаточно или есть несколько вариантов, честно говоришь об этом и описываешь плюсы и минусы каждого.
-Ответы делай чёткими, профессиональными, без лишней воды, но понятными для обычного человека.
+Ты — «Адвокат X», профессиональный юрист по праву РФ.
+Структура ответа:
+1) Краткий вывод.
+2) Правовое основание (статьи только когда уверен).
+3) Варианты решения.
+4) Риски.
+5) Пошаговый план.
+Давай практичные, чёткие, профессиональные ответы.
 """
 
 
-def reset_limits(user_id: int):
-    u = users[user_id]
-    now = datetime.now()
-    if now - u["last_reset"] >= timedelta(days=1):
+def reset_limits(uid):
+    u = users[uid]
+    if datetime.now() - u["last_reset"] >= timedelta(days=1):
         u["free_left"] = FREE_LIMIT
-        u["last_reset"] = now
+        u["last_reset"] = datetime.now()
 
 
-async def ask_model(messages: list) -> str:
-    def _call():
-        return openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.2,
-        )
-
-    resp = await asyncio.to_thread(_call)
-    return resp["choices"][0]["message"]["content"].strip()
+async def ask_model(messages):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.2
+    )
+    return response.choices[0].message.content.strip()
 
 
-async def ask_short(text: str) -> str:
-    msgs = [
+async def ask_short(text):
+    return await ask_model([
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"Сделай короткий, но содержательный ответ (примерно 5–8 предложений):\n\n{text}",
-        },
-    ]
-    return await ask_model(msgs)
+        {"role": "user", "content": f"Дай короткий ответ (5–8 предложений):\n{text}"}
+    ])
 
 
-async def ask_full(text: str) -> str:
-    msgs = [
+async def ask_full(text):
+    return await ask_model([
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"Сделай развёрнутый профессиональный юридический разбор ситуации:\n\n{text}",
-        },
-    ]
-    return await ask_model(msgs)
+        {"role": "user", "content": f"Дай развёрнутую профессиональную консультацию:\n{text}"}
+    ])
 
 
 def kb_main():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Обычная консультация", callback_data="mode_basic")],
-            [
-                InlineKeyboardButton(
-                    text=f"Индивидуальная консультация — {PRICE_INDIV} ₽",
-                    callback_data="buy_indiv",
-                )
-            ],
-            [InlineKeyboardButton(text="Меню услуг", callback_data="menu")],
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Обычная консультация", callback_data="basic")],
+        [InlineKeyboardButton(text=f"Индивидуальная консультация — {PRICE_INDIV} ₽", callback_data="buy_indiv")],
+        [InlineKeyboardButton(text="Меню услуг", callback_data="menu")]
+    ])
 
 
 def kb_menu():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"5 сообщений — {PRICE_PACK5} ₽", callback_data="buy5"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=f"10 сообщений — {PRICE_PACK10} ₽", callback_data="buy10"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=f"20 сообщений — {PRICE_PACK20} ₽", callback_data="buy20"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=f"Индивидуальная консультация — {PRICE_INDIV} ₽",
-                    callback_data="buy_indiv",
-                )
-            ],
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"5 сообщений — {PRICE_PACK5} ₽", callback_data="buy5")],
+        [InlineKeyboardButton(text=f"10 сообщений — {PRICE_PACK10} ₽", callback_data="buy10")],
+        [InlineKeyboardButton(text=f"20 сообщений — {PRICE_PACK20} ₽", callback_data="buy20")],
+        [InlineKeyboardButton(text=f"Индивидуальная консультация — {PRICE_INDIV} ₽", callback_data="buy_indiv")],
+    ])
 
 
-async def create_invoice(chat_id: int, title: str, description: str, payload: str, amount_rub: int):
+async def create_invoice(chat_id, title, description, payload, amount_rub):
     prices = [LabeledPrice(label=title, amount=amount_rub * 100)]
+
+    provider_data = {
+        "receipt": {
+            "items": [
+                {
+                    "description": title,
+                    "quantity": 1,
+                    "amount": {
+                        "value": amount_rub,
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1,
+                    "payment_mode": "full_payment",
+                    "payment_subject": "service"
+                }
+            ],
+            "tax_system_code": 1
+        }
+    }
+
     await bot.send_invoice(
         chat_id=chat_id,
         title=title,
@@ -157,11 +135,12 @@ async def create_invoice(chat_id: int, title: str, description: str, payload: st
         provider_token=PAYMENT_PROVIDER_TOKEN,
         currency="RUB",
         prices=prices,
-        need_name=False,
-        need_phone_number=False,
-        need_email=False,
-        need_shipping_address=False,
-        is_flexible=False,
+
+        need_email=True,
+        send_email_to_provider=True,
+
+        provider_data=json.dumps(provider_data),
+        is_flexible=False
     )
 
 
@@ -170,22 +149,19 @@ async def cmd_start(message: Message):
     uid = message.from_user.id
     reset_limits(uid)
     u = users[uid]
+
     await message.answer(
-        "Здравствуйте! Я — «Адвокат X», юридический ИИ-помощник.\n\n"
-        "Отвечаю по законодательству РФ, помогаю выстроить стратегию и понять, как защитить свои интересы.\n"
-        "Сервис носит информационный характер и не заменяет очную консультацию адвоката.\n\n"
-        f"Ваш бесплатный дневной лимит: {u['free_left']} сообщений.\n"
-        f"Оплаченных сообщений: {u['paid_left']}.\n\n"
-        "Опишите вашу ситуацию или выберите опцию ниже.",
-        reply_markup=kb_main(),
+        "Здравствуйте! Я — «Адвокат X», ваш юридический ИИ-помощник.\n\n"
+        f"Бесплатный дневной лимит: {u['free_left']} сообщений.\n"
+        f"Оплаченных сообщений: {u['paid_left']}.\n"
+        "Опишите вашу ситуацию:",
+        reply_markup=kb_main()
     )
 
 
-@dp.callback_query(F.data == "mode_basic")
-async def cb_mode_basic(call: CallbackQuery):
-    await call.message.answer(
-        "Режим обычной консультации. Задайте вопрос — я отвечу кратко, но по существу."
-    )
+@dp.callback_query(F.data == "basic")
+async def cb_basic(call: CallbackQuery):
+    await call.message.answer("Режим обычной консультации активирован.")
     await call.answer()
 
 
@@ -196,54 +172,32 @@ async def cb_menu(call: CallbackQuery):
 
 
 @dp.callback_query(F.data == "buy_indiv")
-async def cb_buy_indiv(call: CallbackQuery):
-    uid = call.from_user.id
+async def cb_indiv(call: CallbackQuery):
     await create_invoice(
-        chat_id=uid,
+        chat_id=call.from_user.id,
         title="Индивидуальная консультация",
-        description="Развёрнутое сопровождение по одному вопросу до понятного плана действий.",
+        description="Подробный юридический разбор одного вопроса.",
         payload="individual",
-        amount_rub=PRICE_INDIV,
+        amount_rub=PRICE_INDIV
     )
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy5")
 async def cb_buy5(call: CallbackQuery):
-    uid = call.from_user.id
-    await create_invoice(
-        chat_id=uid,
-        title="Пакет 5 сообщений",
-        description="Дополнительные 5 сообщений к вашему лимиту.",
-        payload="pack5",
-        amount_rub=PRICE_PACK5,
-    )
+    await create_invoice(call.from_user.id, "Пакет 5 сообщений", "5 доп. сообщений", "pack5", PRICE_PACK5)
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy10")
 async def cb_buy10(call: CallbackQuery):
-    uid = call.from_user.id
-    await create_invoice(
-        chat_id=uid,
-        title="Пакет 10 сообщений",
-        description="Дополнительные 10 сообщений к вашему лимиту.",
-        payload="pack10",
-        amount_rub=PRICE_PACK10,
-    )
+    await create_invoice(call.from_user.id, "Пакет 10 сообщений", "10 доп. сообщений", "pack10", PRICE_PACK10)
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy20")
 async def cb_buy20(call: CallbackQuery):
-    uid = call.from_user.id
-    await create_invoice(
-        chat_id=uid,
-        title="Пакет 20 сообщений",
-        description="Дополнительные 20 сообщений к вашему лимиту.",
-        payload="pack20",
-        amount_rub=PRICE_PACK20,
-    )
+    await create_invoice(call.from_user.id, "Пакет 20 сообщений", "20 доп. сообщений", "pack20", PRICE_PACK20)
     await call.answer()
 
 
@@ -253,48 +207,40 @@ async def pre_checkout(query: PreCheckoutQuery):
 
 
 @dp.message(F.successful_payment)
-async def on_successful_payment(message: Message):
+async def payment_done(message: Message):
     uid = message.from_user.id
     u = users[uid]
     payload = message.successful_payment.invoice_payload
 
     if payload == "individual":
         u["consult_active"] = True
-        await message.answer(
-            "Индивидуальная консультация активирована.\n"
-            "Опишите, пожалуйста, вашу ситуацию максимально подробно: факты, даты, документы, с кем спор, чего хотите добиться."
-        )
+        await message.answer("Индивидуальная консультация активирована.")
     elif payload == "pack5":
         u["paid_left"] += 5
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 5 сообщений.")
+        await message.answer("Добавлено 5 сообщений!")
     elif payload == "pack10":
         u["paid_left"] += 10
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 10 сообщений.")
+        await message.answer("Добавлено 10 сообщений!")
     elif payload == "pack20":
         u["paid_left"] += 20
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 20 сообщений.")
+        await message.answer("Добавлено 20 сообщений!")
 
 
 @dp.message(F.text)
 async def on_message(message: Message):
     uid = message.from_user.id
-    text = message.text.strip()
+    reset_limits(uid)
     u = users[uid]
 
-    reset_limits(uid)
-
     if u["consult_active"]:
-        ans = await ask_full(text)
+        ans = await ask_full(message.text)
         await message.answer(ans)
         return
 
-    total_left = u["free_left"] + u["paid_left"]
-    if total_left <= 0:
+    if u["free_left"] + u["paid_left"] <= 0:
         await message.answer(
-            "Ваш бесплатный и оплаченный лимит сообщений исчерпан.\n"
-            "Бесплатный лимит обновится через сутки.\n"
-            "Вы можете пополнить сообщения в меню.",
-            reply_markup=kb_menu(),
+            "Лимит сообщений закончился.",
+            reply_markup=kb_menu()
         )
         return
 
@@ -303,13 +249,12 @@ async def on_message(message: Message):
     else:
         u["paid_left"] -= 1
 
-    ans = await ask_short(text)
+    ans = await ask_short(message.text)
 
     await message.answer(
         f"{ans}\n\n"
-        f"Остаток бесплатных сообщений на сегодня: {u['free_left']}.\n"
-        f"Остаток оплаченных сообщений: {u['paid_left']}.",
-        reply_markup=kb_menu(),
+        f"Бесплатные: {u['free_left']} | Платные: {u['paid_left']}",
+        reply_markup=kb_menu()
     )
 
 
@@ -319,6 +264,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
