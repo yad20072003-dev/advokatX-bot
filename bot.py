@@ -341,28 +341,8 @@ def kb_full_support():
 
 
 async def create_invoice(chat_id, title, description, payload, amount_rub):
-    amount_int = int(amount_rub)
-    prices = [LabeledPrice(label=title, amount=amount_int * 100)]
-    provider_data = json.dumps(
-        {
-            "receipt": {
-                "items": [
-                    {
-                        "description": title,
-                        "quantity": 1,
-                        "amount": {
-                            "value": f"{amount_int}.00",
-                            "currency": "RUB",
-                        },
-                        "vat_code": 1,
-                        "payment_mode": "full_payment",
-                        "payment_subject": "service",
-                    }
-                ],
-                "tax_system_code": 1,
-            }
-        }
-    )
+    amount_cents = int(round(amount_rub * 100))
+    prices = [LabeledPrice(label=title, amount=amount_cents)]
 
     await bot.send_invoice(
         chat_id=chat_id,
@@ -374,7 +354,6 @@ async def create_invoice(chat_id, title, description, payload, amount_rub):
         prices=prices,
         need_email=True,
         send_email_to_provider=True,
-        provider_data=provider_data,
     )
 
 
@@ -1030,6 +1009,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
