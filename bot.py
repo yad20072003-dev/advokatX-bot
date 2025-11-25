@@ -298,27 +298,22 @@ def kb_menu():
     )
 
 
-def kb_main_button():
+def kb_main_button(doc: bool = False):
+    if not doc:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_main")]
+            ]
+        )
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_main")]
-        ]
-    )
-
-
-def kb_doc_format():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📄 DOCX", callback_data="fmt_docx"),
-                InlineKeyboardButton(text="📑 PDF", callback_data="fmt_pdf"),
-            ],
             [
                 InlineKeyboardButton(
-                    text="📄 DOCX + 📑 PDF", callback_data="fmt_both"
-                ),
+                    text=f"📄 Составить документ по этой ситуации — {PRICE_DOC_COMPOSE} ₽",
+                    callback_data="buy_doc_compose",
+                )
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="catalog")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_main")],
         ]
     )
 
@@ -329,7 +324,7 @@ def kb_full_support():
             [
                 InlineKeyboardButton(
                     text=f"Составить документ по этой ситуации — {PRICE_DOC_COMPOSE} ₽",
-                    callback_data="srv_doc_compose",
+                    callback_data="buy_doc_compose",
                 )
             ],
             [InlineKeyboardButton(text="✅ Дело решено", callback_data="case_done")],
@@ -342,7 +337,6 @@ def kb_full_support():
 async def create_invoice(chat_id, title, description, payload, amount_rub):
     amount_cents = int(round(amount_rub * 100))
     prices = [LabeledPrice(label=title, amount=amount_cents)]
-
     await bot.send_invoice(
         chat_id=chat_id,
         title=title,
@@ -414,6 +408,16 @@ def is_same_case(new_text: str, base_text: str | None) -> bool:
     inter = len(a & b)
     ratio = inter / min(len(a), len(b))
     return ratio >= 0.25
+
+
+def need_doc_button(answer: str) -> bool:
+    a = answer.lower()
+    return bool(
+        re.search(
+            r"заявлен|претензи|жалоб|иск|договор|расписк|соглашени|ходатайств|акт|протокол",
+            a,
+        )
+    )
 
 
 @dp.message(CommandStart())
@@ -541,7 +545,8 @@ async def srv_doc_compose(call: CallbackQuery):
         "Что вы получаете:\n"
         "• текст юридического документа по вашей ситуации (претензия, заявление, жалоба, иск, договор и др.);\n"
         "• деловой стиль, структура и правовое обоснование там, где это уместно;\n"
-        "• документ, который готов к использованию после подстановки ваших данных."
+        "• документ, который готов к использованию после подстановки ваших данных.\n\n"
+        "Файл будет выдан в формате DOCX."
     )
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -739,33 +744,6 @@ async def buy20(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data.in_({"fmt_docx", "fmt_pdf", "fmt_both"}))
-async def choose_format(call: CallbackQuery):
-    uid = call.from_user.id
-    u = users[uid]
-
-    if u["service"] != "doc_compose_wait_format":
-        await call.answer()
-        return
-
-    if call.data == "fmt_docx":
-        u["doc_format"] = "docx"
-        fmt_text = "DOCX"
-    elif call.data == "fmt_pdf":
-        u["doc_format"] = "pdf"
-        fmt_text = "PDF"
-    else:
-        u["doc_format"] = "both"
-        fmt_text = "DOCX + PDF"
-
-    u["service"] = "doc_compose"
-    await call.message.answer(
-        f"Формат: {fmt_text}.\nТеперь опишите вашу ситуацию и какой документ вам нужен "
-        "(претензия, заявление, жалоба, иск, объяснительная и т.п.)."
-    )
-    await call.answer()
-
-
 @dp.callback_query(F.data == "case_done")
 async def case_done(call: CallbackQuery):
     uid = call.from_user.id
@@ -800,12 +778,12 @@ async def paid(message: Message):
             reply_markup=kb_main_button(),
         )
     elif payload == "doc_compose":
-        u["service"] = "doc_compose_wait_format"
-        u["doc_format"] = None
+        u["service"] = "doc_compose"
+        u["doc_format"] = "docx"
         await message.answer(
             "Оплата прошла.\n"
-            "Выберите формат документа, который хотите получить:",
-            reply_markup=kb_doc_format(),
+            "Опишите подробно вашу ситуацию и укажите, какой документ вы хотите получить (претензия, заявление, иск и т.п.).",
+            reply_markup=kb_main_button(),
         )
     elif payload == "doc_check":
         u["service"] = "doc_check"
@@ -915,24 +893,11 @@ async def msg(message: Message):
     if u["service"] == "doc_compose":
         ans = await ask_doc_compose(text)
         await message.answer(ans)
-
-        fmt = u.get("doc_format") or "docx"
-        uid_int = uid
-
-        if fmt in ("docx", "both"):
-            docx_path = make_docx_file(ans, uid_int)
-            await message.answer_document(
-                FSInputFile(docx_path),
-                caption="Ваш документ в формате DOCX.",
-            )
-
-        if fmt in ("pdf", "both"):
-            pdf_path = make_pdf_file(ans, uid_int)
-            await message.answer_document(
-                FSInputFile(pdf_path),
-                caption="Ваш документ в формате PDF.",
-            )
-
+        docx_path = make_docx_file(ans, uid)
+        await message.answer_document(
+            FSInputFile(docx_path),
+            caption="Ваш документ в формате DOCX.",
+        )
         u["service"] = None
         u["doc_format"] = None
         await message.answer(
@@ -955,8 +920,9 @@ async def msg(message: Message):
 
     if u["service"] == "deep":
         ans = await ask_individual_consult(text)
+        doc_btn = need_doc_button(ans)
         u["service"] = None
-        await message.answer(ans, reply_markup=kb_main_button())
+        await message.answer(ans, reply_markup=kb_main_button(doc_btn))
         return
 
     if u["consult_active"] and u.get("case_mode") == "full":
@@ -993,12 +959,13 @@ async def msg(message: Message):
         u["paid_left"] -= 1
 
     ans = await ask_short_consult(text)
+    doc_btn = need_doc_button(ans)
 
     await message.answer(
         f"{ans}\n\n"
         f"Бесплатных сообщений на сегодня: {u['free_left']}\n"
         f"Оплаченных сообщений: {u['paid_left']}",
-        reply_markup=kb_main_button(),
+        reply_markup=kb_main_button(doc_btn),
     )
 
 
@@ -1008,6 +975,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
