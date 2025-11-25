@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import json
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -47,8 +48,17 @@ users = defaultdict(
 
 SYSTEM_PROMPT = """
 Ты — «Адвокат X», профессиональный юрист по праву РФ и опытный процессуалист.
-Ты даёшь глубокие, структурированные ответы, приводишь стратегию, правовые основания,
-пошаговые действия, и всегда спрашиваешь уточняющие детали, если они нужны.
+Ты:
+1) Всегда уточняешь факты, если их не хватает для точного ответа.
+2) Строишь ответы по структуре:
+   - Краткий вывод по ситуации;
+   - Правовое основание;
+   - Варианты действий;
+   - Риски;
+   - Пошаговый план.
+3) Не предлагаешь незаконных действий.
+4) Даёшь максимально выгодную стратегию в рамках закона.
+5) Если фактов мало — уточняешь.
 """
 
 
@@ -67,25 +77,22 @@ async def ask_model(messages: list) -> str:
             messages=messages,
             temperature=0.2,
         )
+    r = await asyncio.to_thread(_call)
+    return r["choices"][0]["message"]["content"].strip()
 
-    resp = await asyncio.to_thread(_call)
-    return resp["choices"][0]["message"]["content"].strip()
 
-
-async def ask_short(text: str) -> str:
-    msgs = [
+async def ask_short(text: str):
+    return await ask_model([
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Дай короткий, но сильный юридический ответ:\n{text}"},
-    ]
-    return await ask_model(msgs)
+        {"role": "user", "content": f"Короткий, насыщенный ответ:\n{text}"},
+    ])
 
 
-async def ask_full(text: str) -> str:
-    msgs = [
+async def ask_full(text: str):
+    return await ask_model([
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Сделай полный профессиональный юридический разбор:\n{text}"},
-    ]
-    return await ask_model(msgs)
+        {"role": "user", "content": f"Полный подробный разбор:\n{text}"},
+    ])
 
 
 def kb_main():
@@ -109,10 +116,9 @@ def kb_menu():
     )
 
 
-async def create_invoice(chat_id: int, title: str, description: str, payload: str, amount_rub: int):
+async def create_invoice(chat_id, title, description, payload, amount_rub):
     prices = [LabeledPrice(label=title, amount=amount_rub * 100)]
-
-    provider_data = {
+    provider_data = json.dumps({
         "receipt": {
             "items": [
                 {
@@ -121,12 +127,12 @@ async def create_invoice(chat_id: int, title: str, description: str, payload: st
                     "amount": {"value": float(amount_rub), "currency": "RUB"},
                     "vat_code": 1,
                     "payment_mode": "full_payment",
-                    "payment_subject": "service",
+                    "payment_subject": "service"
                 }
             ],
             "tax_system_code": 1
         }
-    }
+    })
 
     await bot.send_invoice(
         chat_id=chat_id,
@@ -143,107 +149,86 @@ async def create_invoice(chat_id: int, title: str, description: str, payload: st
 
 
 @dp.message(CommandStart())
-async def cmd_start(message: Message):
+async def start_cmd(message: Message):
     uid = message.from_user.id
     reset_limits(uid)
     u = users[uid]
     await message.answer(
-        "Здравствуйте! Я — «Адвокат X».\n"
-        f"Бесплатный лимит: {u['free_left']} сообщений.\n"
-        f"Оплаченных: {u['paid_left']}.\n"
-        "Опишите вашу ситуацию.",
+        f"Здравствуйте! Я — «Адвокат X».\n\n"
+        f"Бесплатных сообщений: {u['free_left']}\n"
+        f"Оплаченных: {u['paid_left']}\n\n"
+        "Опишите проблему или выберите действие:",
         reply_markup=kb_main(),
     )
 
 
 @dp.callback_query(F.data == "mode_basic")
-async def cb_mode_basic(call: CallbackQuery):
-    await call.message.answer("Обычная консультация включена.")
+async def mode_basic(call: CallbackQuery):
+    await call.message.answer("Обычная консультация активирована.")
     await call.answer()
 
 
 @dp.callback_query(F.data == "menu")
-async def cb_menu(call: CallbackQuery):
-    await call.message.answer("Меню услуг:", reply_markup=kb_menu())
+async def menu(call: CallbackQuery):
+    await call.message.answer("Услуги:", reply_markup=kb_menu())
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy_indiv")
-async def cb_buy_indiv(call: CallbackQuery):
-    await create_invoice(
-        chat_id=call.from_user.id,
-        title="Индивидуальная консультация",
-        description="Подробное юридическое сопровождение.",
-        payload="individual",
-        amount_rub=PRICE_INDIV,
-    )
+async def buy_indiv(call: CallbackQuery):
+    uid = call.from_user.id
+    await create_invoice(uid, "Индивидуальная консультация", "Подробный разбор одного вопроса", "individual", PRICE_INDIV)
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy5")
-async def cb_buy5(call: CallbackQuery):
-    await create_invoice(
-        chat_id=call.from_user.id,
-        title="Пакет 5 сообщений",
-        description="Плюс 5 сообщений к лимиту.",
-        payload="pack5",
-        amount_rub=PRICE_PACK5,
-    )
+async def buy5(call: CallbackQuery):
+    uid = call.from_user.id
+    await create_invoice(uid, "Пакет 5 сообщений", "Дополнительно 5 сообщений", "pack5", PRICE_PACK5)
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy10")
-async def cb_buy10(call: CallbackQuery):
-    await create_invoice(
-        chat_id=call.from_user.id,
-        title="Пакет 10 сообщений",
-        description="Плюс 10 сообщений к лимиту.",
-        payload="pack10",
-        amount_rub=PRICE_PACK10,
-    )
+async def buy10(call: CallbackQuery):
+    uid = call.from_user.id
+    await create_invoice(uid, "Пакет 10 сообщений", "Дополнительно 10 сообщений", "pack10", PRICE_PACK10)
     await call.answer()
 
 
 @dp.callback_query(F.data == "buy20")
-async def cb_buy20(call: CallbackQuery):
-    await create_invoice(
-        chat_id=call.from_user.id,
-        title="Пакет 20 сообщений",
-        description="Плюс 20 сообщений к лимиту.",
-        payload="pack20",
-        amount_rub=PRICE_PACK20,
-    )
+async def buy20(call: CallbackQuery):
+    uid = call.from_user.id
+    await create_invoice(uid, "Пакет 20 сообщений", "Дополнительно 20 сообщений", "pack20", PRICE_PACK20)
     await call.answer()
 
 
 @dp.pre_checkout_query()
-async def pre_checkout(query: PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(query.id, ok=True)
+async def checkout(q: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(q.id, ok=True)
 
 
 @dp.message(F.successful_payment)
-async def on_successful_payment(message: Message):
+async def paid(message: Message):
     uid = message.from_user.id
+    payload = message.successful_payment.invoice_payload
     u = users[uid]
 
-    p = message.successful_payment.invoice_payload
-
-    if p == "individual":
+    if payload == "individual":
         u["consult_active"] = True
-        await message.answer("Индивидуальная консультация активирована. Опишите ситуацию.")
-    elif p == "pack5":
+        await message.answer("Индивидуальная консультация активирована. Опишите вашу ситуацию.")
+    elif payload == "pack5":
         u["paid_left"] += 5
         await message.answer("Добавлено 5 сообщений.")
-    elif p == "pack10":
+    elif payload == "pack10":
         u["paid_left"] += 10
         await message.answer("Добавлено 10 сообщений.")
-    elif p == "pack20":
+    elif payload == "pack20":
         u["paid_left"] += 20
         await message.answer("Добавлено 20 сообщений.")
 
 
 @dp.message(F.text)
-async def on_message(message: Message):
+async def msg(message: Message):
     uid = message.from_user.id
     text = message.text
     u = users[uid]
@@ -255,12 +240,8 @@ async def on_message(message: Message):
         await message.answer(ans)
         return
 
-    total = u["free_left"] + u["paid_left"]
-    if total <= 0:
-        await message.answer(
-            "Лимит исчерпан. Пополните его.",
-            reply_markup=kb_menu(),
-        )
+    if u["free_left"] + u["paid_left"] <= 0:
+        await message.answer("Лимит исчерпан.", reply_markup=kb_menu())
         return
 
     if u["free_left"] > 0:
@@ -269,9 +250,11 @@ async def on_message(message: Message):
         u["paid_left"] -= 1
 
     ans = await ask_short(text)
+
     await message.answer(
         f"{ans}\n\n"
-        f"Бесплатных: {u['free_left']} | Платных: {u['paid_left']}",
+        f"Бесплатных: {u['free_left']}\n"
+        f"Оплаченных: {u['paid_left']}",
         reply_markup=kb_menu(),
     )
 
@@ -282,6 +265,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
