@@ -23,6 +23,7 @@ from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import PyPDF2
+import re
 
 load_dotenv()
 
@@ -54,9 +55,11 @@ users = defaultdict(
         "free_left": FREE_LIMIT,
         "paid_left": 0,
         "last_reset": datetime.now(),
-        "consult_active": False,   # индивидуальная консультация / полное сопровождение
-        "service": None,           # разовые услуги: doc_compose / doc_check / plan
-        "doc_format": None,        # для составления документа: docx / pdf / both
+        "consult_active": False,
+        "service": None,
+        "doc_format": None,
+        "case_mode": None,
+        "case_summary": None,
     }
 )
 
@@ -97,121 +100,135 @@ async def ask_model(messages: list) -> str:
 
 
 async def ask_short_consult(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Режим: краткая консультация.\n"
-                "Сделай короткий, но насыщенный ответ (5–8 предложений), без лишней воды:\n\n"
-                f"{text}"
-            ),
-        },
-    ])
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Режим: краткая консультация.\n"
+                    "Сделай короткий, но насыщенный ответ (5–8 предложений), без лишней воды:\n\n"
+                    f"{text}"
+                ),
+            },
+        ]
+    )
 
 
 async def ask_individual_consult(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Режим: индивидуальная консультация.\n"
-                "Сделай развёрнутый профессиональный разбор ситуации с максимально подробной стратегией:\n\n"
-                f"{text}"
-            ),
-        },
-    ])
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Режим: углубленный разбор одного вопроса.\n"
+                    "Дай развёрнутый профессиональный разбор ситуации, как на очной консультации у юриста:\n"
+                    "– чёткий вывод;\n"
+                    "– ссылки на нормы права РФ (если уверен);\n"
+                    "– варианты стратегии и тактики;\n"
+                    "– практические советы, как усилить позицию клиента.\n\n"
+                    f"{text}"
+                ),
+            },
+        ]
+    )
 
 
 async def ask_doc_compose(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Нужно составить готовый юридический документ по описанной ситуации.\n"
-                "Сам выбери тип документа (претензия, заявление, жалоба, иск, объяснительная, договор и т.п.), "
-                "который лучше всего подходит.\n\n"
-                "Сделай документ в структуре:\n"
-                "- шапка (кому, от кого — шаблонно, без реальных данных);\n"
-                "- вводная часть (кратко суть ситуации);\n"
-                "- правовое обоснование с нормами права РФ, если это уместно;\n"
-                "- требования / просьба / условия;\n"
-                "- заключительная часть, место для даты и подписи.\n\n"
-                "Документ должен быть оформлен сухим деловым стилем и быть максимально готовым к использованию после "
-                "подстановки ФИО, адресов и реквизитов.\n\n"
-                f"СИТУАЦИЯ:\n{text}"
-            ),
-        },
-    ])
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Нужно составить готовый юридический документ по описанной ситуации.\n"
+                    "Сам выбери тип документа (претензия, заявление, жалоба, иск, объяснительная, договор и т.п.), "
+                    "который лучше всего подходит.\n\n"
+                    "Сделай документ в структуре:\n"
+                    "- шапка (кому, от кого — шаблонно, без реальных данных);\n"
+                    "- вводная часть (кратко суть ситуации);\n"
+                    "- правовое обоснование с нормами права РФ, если это уместно;\n"
+                    "- требования / просьба / условия;\n"
+                    "- заключительная часть, место для даты и подписи.\n\n"
+                    "Документ должен быть оформлен сухим деловым стилем и быть максимально готовым к использованию после "
+                    "подстановки ФИО, адресов и реквизитов.\n\n"
+                    f"СИТУАЦИЯ:\n{text}"
+                ),
+            },
+        ]
+    )
 
 
 async def ask_doc_check(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Режим: проверка юридического документа.\n"
-                "Текст ниже — это документ/его черновик.\n\n"
-                "Твоя задача:\n"
-                "- указать потенциальные риски и слабые формулировки;\n"
-                "- отметить, что может быть использовано против клиента;\n"
-                "- предложить формулировки, которые лучше защитят интересы клиента;\n"
-                "- если есть пробелы (нет сроков, порядка расторжения, ответственности и т.п.) — указать это.\n\n"
-                "Ответ сделай структурированным, по пунктам.\n\n"
-                f"ТЕКСТ ДОКУМЕНТА:\n{text}"
-            ),
-        },
-    ])
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Режим: проверка юридического документа.\n"
+                    "Текст ниже — это документ или его черновик.\n\n"
+                    "Твоя задача:\n"
+                    "- указать потенциальные риски и слабые формулировки;\n"
+                    "- отметить, что может быть использовано против клиента;\n"
+                    "- предложить формулировки, которые лучше защитят интересы клиента;\n"
+                    "- если есть пробелы (нет сроков, порядка расторжения, ответственности и т.п.) — указать это.\n\n"
+                    "Ответ сделай структурированным, по пунктам, как это сделал бы практикующий юрист.\n\n"
+                    f"ТЕКСТ ДОКУМЕНТА:\n{text}"
+                ),
+            },
+        ]
+    )
 
 
 async def ask_plan_actions(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Режим: составление плана действий.\n"
-                "Нужно сделать чёткий, по шагам, план действий для клиента по его ситуации.\n\n"
-                "Структура ответа:\n"
-                "1) Краткий вывод по ситуации.\n"
-                "2) Общая стратегия (что мы хотим получить в итоге).\n"
-                "3) Подробный пошаговый план с примерными сроками (дни/недели) и куда обращаться.\n"
-                "4) Какие документы собирать.\n"
-                "5) Возможные риски и что делать, если всё идёт не по плану.\n\n"
-                f"СИТУАЦИЯ:\n{text}"
-            ),
-        },
-    ])
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Режим: составление плана действий.\n"
+                    "Нужно сделать чёткий, по шагам, план действий для клиента по его ситуации.\n\n"
+                    "Структура ответа:\n"
+                    "1) Краткий вывод по ситуации.\n"
+                    "2) Общая стратегия (что хотим получить в итоге).\n"
+                    "3) Подробный пошаговый план с примерными сроками (дни/недели) и указанием, куда обращаться.\n"
+                    "4) Какие документы собирать.\n"
+                    "5) Возможные риски и что делать, если всё идёт не по плану.\n\n"
+                    f"СИТУАЦИЯ:\n{text}"
+                ),
+            },
+        ]
+    )
 
 
-async def ask_full_support(text: str) -> str:
-    return await ask_model([
-        {"role": "system", "content": SYSTEM_PROMPT_BASE},
-        {
-            "role": "user",
-            "content": (
-                "Режим: полное сопровождение дела.\n"
-                "Считай, что ты сопровождаешь клиента по одному делу: тебе нужно не просто ответить, а помочь "
-                "выстроить стратегию, предусмотреть ходы оппонента и варианты развития, объяснить, что делать дальше.\n\n"
-                "Сделай детальный разбор и практическую тактику:\n\n"
-                f"{text}"
-            ),
-        },
-    ])
+async def ask_full_support(text: str, case_summary: str | None = None) -> str:
+    case_part = f"Краткое описание дела, которое ты ведёшь: {case_summary}\n\n" if case_summary else ""
+    return await ask_model(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {
+                "role": "user",
+                "content": (
+                    "Режим: полное сопровождение дела.\n"
+                    "Ты ведёшь одно конкретное дело клиента. Тебе нужно помогать выстраивать стратегию, "
+                    "предусматривать ходы оппонента и варианты развития, объяснять, что делать дальше.\n\n"
+                    f"{case_part}"
+                    "Сделай детальный разбор и практическую тактику по текущему сообщению клиента:\n\n"
+                    f"{text}"
+                ),
+            },
+        ]
+    )
 
 
 def kb_main():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Обычная консультация", callback_data="mode_basic")],
-            [InlineKeyboardButton(text=f"Индивидуальная консультация — {PRICE_INDIV} ₽", callback_data="buy_indiv")],
-            [InlineKeyboardButton(text=f"Составить документ — {PRICE_DOC_COMPOSE} ₽", callback_data="buy_doc_compose")],
-            [InlineKeyboardButton(text=f"Проверить документ — {PRICE_DOC_CHECK} ₽", callback_data="buy_doc_check")],
-            [InlineKeyboardButton(text=f"План действий — {PRICE_PLAN} ₽", callback_data="buy_plan")],
-            [InlineKeyboardButton(text=f"Полное сопровождение дела — {PRICE_FULL_SUPPORT} ₽", callback_data="buy_full_support")],
+            [InlineKeyboardButton(text="Задать вопрос", callback_data="mode_basic")],
+            [InlineKeyboardButton(text="Каталог услуг", callback_data="catalog")],
             [InlineKeyboardButton(text="Пакеты сообщений", callback_data="menu")],
             [InlineKeyboardButton(text="ℹ️ Инфо", callback_data="info")],
             [InlineKeyboardButton(text="⚖️ Условия использования", callback_data="terms")],
@@ -219,26 +236,74 @@ def kb_main():
     )
 
 
-def kb_menu():
+def kb_catalog():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"5 сообщений — {PRICE_PACK5} ₽", callback_data="buy5")],
-            [InlineKeyboardButton(text=f"10 сообщений — {PRICE_PACK10} ₽", callback_data="buy10")],
-            [InlineKeyboardButton(text=f"20 сообщений — {PRICE_PACK20} ₽", callback_data="buy20")],
-            [InlineKeyboardButton(text=f"Индивидуальная консультация — {PRICE_INDIV} ₽", callback_data="buy_indiv")],
+            [
+                InlineKeyboardButton(
+                    text=f"Углубленный разбор — {PRICE_INDIV} ₽", callback_data="srv_indiv"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"Составить документ — {PRICE_DOC_COMPOSE} ₽",
+                    callback_data="srv_doc_compose",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"Проверить документ — {PRICE_DOC_CHECK} ₽",
+                    callback_data="srv_doc_check",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"План действий — {PRICE_PLAN} ₽", callback_data="srv_plan"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"Полное сопровождение дела — {PRICE_FULL_SUPPORT} ₽",
+                    callback_data="srv_full_support",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")],
         ]
     )
 
 
-def kb_with_doc_offer():
-    base = kb_menu().inline_keyboard
+def kb_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(
-                text=f"Составить документ по этой ситуации — {PRICE_DOC_COMPOSE} ₽",
-                callback_data="buy_doc_compose"
-            )]
-        ] + base
+            [
+                InlineKeyboardButton(
+                    text=f"5 сообщений — {PRICE_PACK5} ₽", callback_data="buy5"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"10 сообщений — {PRICE_PACK10} ₽", callback_data="buy10"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"20 сообщений — {PRICE_PACK20} ₽", callback_data="buy20"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад в главное меню", callback_data="back_main"
+                )
+            ],
+        ]
+    )
+
+
+def kb_main_button():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_main")]
+        ]
     )
 
 
@@ -250,29 +315,54 @@ def kb_doc_format():
                 InlineKeyboardButton(text="📑 PDF", callback_data="fmt_pdf"),
             ],
             [
-                InlineKeyboardButton(text="📄 DOCX + PDF", callback_data="fmt_both"),
+                InlineKeyboardButton(
+                    text="📄 DOCX + 📑 PDF", callback_data="fmt_both"
+                ),
             ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="catalog")],
+        ]
+    )
+
+
+def kb_full_support():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Составить документ по этой ситуации — {PRICE_DOC_COMPOSE} ₽",
+                    callback_data="srv_doc_compose",
+                )
+            ],
+            [InlineKeyboardButton(text="✅ Дело решено", callback_data="case_done")],
+            [InlineKeyboardButton(text="Пакеты сообщений", callback_data="menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_main")],
         ]
     )
 
 
 async def create_invoice(chat_id, title, description, payload, amount_rub):
-    prices = [LabeledPrice(label=title, amount=amount_rub * 100)]
-    provider_data = json.dumps({
-        "receipt": {
-            "items": [
-                {
-                    "description": title,
-                    "quantity": 1,
-                    "amount": {"value": float(amount_rub), "currency": "RUB"},
-                    "vat_code": 1,
-                    "payment_mode": "full_payment",
-                    "payment_subject": "service"
-                }
-            ],
-            "tax_system_code": 1
+    amount_int = int(amount_rub)
+    prices = [LabeledPrice(label=title, amount=amount_int * 100)]
+    provider_data = json.dumps(
+        {
+            "receipt": {
+                "items": [
+                    {
+                        "description": title,
+                        "quantity": 1,
+                        "amount": {
+                            "value": f"{amount_int}.00",
+                            "currency": "RUB",
+                        },
+                        "vat_code": 1,
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service",
+                    }
+                ],
+                "tax_system_code": 1,
+            }
         }
-    })
+    )
 
     await bot.send_invoice(
         chat_id=chat_id,
@@ -284,7 +374,7 @@ async def create_invoice(chat_id, title, description, payload, amount_rub):
         prices=prices,
         need_email=True,
         send_email_to_provider=True,
-        provider_data=provider_data
+        provider_data=provider_data,
     )
 
 
@@ -332,6 +422,22 @@ def extract_text_from_file(path: str) -> str:
     return ""
 
 
+def is_same_case(new_text: str, base_text: str | None) -> bool:
+    if not base_text:
+        return True
+
+    def tokens(s: str):
+        return {w for w in re.findall(r"\w+", s.lower()) if len(w) >= 4}
+
+    a = tokens(new_text)
+    b = tokens(base_text)
+    if not a or not b:
+        return True
+    inter = len(a & b)
+    ratio = inter / min(len(a), len(b))
+    return ratio >= 0.25
+
+
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
     uid = message.from_user.id
@@ -346,20 +452,36 @@ async def start_cmd(message: Message):
         "• Перед серьёзными действиями желательно дополнительно проконсультироваться с живым юристом.\n\n"
         f"Бесплатных сообщений на сегодня: {u['free_left']}\n"
         f"Оплаченных сообщений: {u['paid_left']}\n\n"
-        "Опишите вашу ситуацию или выберите нужную услугу ниже.",
+        "Опишите вашу ситуацию или выберите нужный раздел ниже.",
         reply_markup=kb_main(),
     )
 
 
+@dp.callback_query(F.data == "back_main")
+async def back_main(call: CallbackQuery):
+    await call.message.answer("Главное меню:", reply_markup=kb_main())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "catalog")
+async def catalog(call: CallbackQuery):
+    await call.message.answer("Каталог услуг:", reply_markup=kb_catalog())
+    await call.answer()
+
+
 @dp.callback_query(F.data == "mode_basic")
 async def mode_basic(call: CallbackQuery):
-    await call.message.answer("Режим обычной консультации активирован. Опишите вашу ситуацию одним сообщением.")
+    await call.message.answer(
+        "Режим «Задать вопрос» активирован. Опишите вашу ситуацию одним сообщением."
+    )
     await call.answer()
 
 
 @dp.callback_query(F.data == "menu")
 async def menu(call: CallbackQuery):
-    await call.message.answer("Пакеты сообщений и индивидуальная консультация:", reply_markup=kb_menu())
+    await call.message.answer(
+        "Пакеты сообщений:", reply_markup=kb_menu()
+    )
     await call.answer()
 
 
@@ -367,10 +489,11 @@ async def menu(call: CallbackQuery):
 async def info(call: CallbackQuery):
     text = (
         "ℹ️ Кратко об услугах бота «Адвокат X»:\n\n"
-        "1. Обычная консультация (по умолчанию)\n"
+        "1. Задать вопрос\n"
         "   Краткий, но по существу ответ на ваш вопрос в пределах дневного лимита.\n\n"
-        f"2. Индивидуальная консультация — {PRICE_INDIV} ₽\n"
-        "   Подробный разбор одного вопроса с расширенными объяснениями, стратегией и рисками.\n\n"
+        f"2. Углубленный разбор — {PRICE_INDIV} ₽\n"
+        "   Подробный разбор одного вопроса с объяснениями, стратегией, рисками и рекомендациями, "
+        "как это сделал бы практикующий юрист.\n\n"
         f"3. Составить документ — {PRICE_DOC_COMPOSE} ₽\n"
         "   Подготовка текста юридического документа по вашей ситуации "
         "(претензия, заявление, жалоба, иск и т.п.). Вы получите готовый текст, "
@@ -382,8 +505,8 @@ async def info(call: CallbackQuery):
         "   Подробный пошаговый план: что делать, куда обращаться, какие документы готовить, "
         "на что обратить внимание.\n\n"
         f"6. Полное сопровождение дела — {PRICE_FULL_SUPPORT} ₽\n"
-        "   Расширенный режим: детальные ответы, стратегия, разбор вариантов и помощь в одном вопросе "
-        "до понятного плана действий.\n\n"
+        "   Сопровождение одного дела: стратегия, ответы на уточняющие вопросы, "
+        "подготовка к шагам и реакция на действия оппонентов.\n\n"
         "Оплату принимает Telegram через ЮKassa. Чек приходит на указанный e-mail."
     )
     await call.message.answer(text)
@@ -408,12 +531,138 @@ async def terms(call: CallbackQuery):
     await call.answer()
 
 
+@dp.callback_query(F.data == "srv_indiv")
+async def srv_indiv(call: CallbackQuery):
+    text = (
+        "Услуга: «Углубленный разбор».\n\n"
+        "Что вы получаете:\n"
+        "• подробный разбор одного вопроса;\n"
+        "• анализ правовых рисков;\n"
+        "• стратегию и тактику действий;\n"
+        "• практические рекомендации, как защитить свои интересы.\n\n"
+        "Услуга рассчитана на один вопрос и один развёрнутый ответ."
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить — {PRICE_INDIV} ₽", callback_data="buy_indiv"
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к каталогу", callback_data="catalog")],
+        ]
+    )
+    await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "srv_doc_compose")
+async def srv_doc_compose(call: CallbackQuery):
+    text = (
+        "Услуга: «Составить документ».\n\n"
+        "Что вы получаете:\n"
+        "• текст юридического документа по вашей ситуации (претензия, заявление, жалоба, иск, договор и др.);\n"
+        "• деловой стиль, структура и правовое обоснование там, где это уместно;\n"
+        "• документ, который готов к использованию после подстановки ваших данных."
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить — {PRICE_DOC_COMPOSE} ₽",
+                    callback_data="buy_doc_compose",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к каталогу", callback_data="catalog")],
+        ]
+    )
+    await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "srv_doc_check")
+async def srv_doc_check(call: CallbackQuery):
+    text = (
+        "Услуга: «Проверить документ».\n\n"
+        "Что вы получаете:\n"
+        "• анализ текста документа;\n"
+        "• указание рисков и слабых формулировок;\n"
+        "• предложения по усилению вашей позиции;\n"
+        "• рекомендации, какие пункты стоит добавить или изменить.\n\n"
+        "Документ можно отправить текстом или файлом (PDF, DOCX, TXT)."
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить — {PRICE_DOC_CHECK} ₽",
+                    callback_data="buy_doc_check",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к каталогу", callback_data="catalog")],
+        ]
+    )
+    await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "srv_plan")
+async def srv_plan(call: CallbackQuery):
+    text = (
+        "Услуга: «План действий».\n\n"
+        "Что вы получаете:\n"
+        "• чёткий по шагам план, что делать по вашему делу;\n"
+        "• примерные сроки,\n"
+        "• куда обращаться и какие документы собирать;\n"
+        "• предупреждение о рисках и вариантах, если что-то пойдёт не по плану."
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить — {PRICE_PLAN} ₽", callback_data="buy_plan"
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к каталогу", callback_data="catalog")],
+        ]
+    )
+    await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "srv_full_support")
+async def srv_full_support(call: CallbackQuery):
+    text = (
+        "Услуга: «Полное сопровождение дела».\n\n"
+        "Что вы получаете:\n"
+        "• сопровождение одного конкретного дела;\n"
+        "• стратегию и тактику по делу;\n"
+        "• ответы на уточняющие вопросы по мере развития ситуации;\n"
+        "• помощь в оценке действий оппонентов и органов;\n"
+        "• рекомендации, когда стоит завершить дело или менять стратегию.\n\n"
+        "Для другого дела потребуется оформить новую услугу."
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить — {PRICE_FULL_SUPPORT} ₽",
+                    callback_data="buy_full_support",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к каталогу", callback_data="catalog")],
+        ]
+    )
+    await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
 @dp.callback_query(F.data == "buy_indiv")
 async def buy_indiv(call: CallbackQuery):
     uid = call.from_user.id
     await create_invoice(
         uid,
-        "Индивидуальная консультация",
+        "Углубленный разбор",
         "Развёрнутый разбор одного юридического вопроса.",
         "individual",
         PRICE_INDIV,
@@ -539,6 +788,21 @@ async def choose_format(call: CallbackQuery):
     await call.answer()
 
 
+@dp.callback_query(F.data == "case_done")
+async def case_done(call: CallbackQuery):
+    uid = call.from_user.id
+    u = users[uid]
+    u["consult_active"] = False
+    u["case_mode"] = None
+    u["case_summary"] = None
+    await call.message.answer(
+        "Отмечаю дело как завершённое.\n"
+        "Если появится новое дело, вы можете заказать новую услугу «Полное сопровождение дела».",
+        reply_markup=kb_main(),
+    )
+    await call.answer()
+
+
 @dp.pre_checkout_query()
 async def checkout(q: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(q.id, ok=True)
@@ -551,10 +815,11 @@ async def paid(message: Message):
     u = users[uid]
 
     if payload == "individual":
-        u["consult_active"] = True
+        u["service"] = "deep"
         await message.answer(
-            "Индивидуальная консультация активирована.\n"
-            "Опишите, пожалуйста, вашу ситуацию максимально подробно: факты, даты, документы, с кем спор, чего хотите добиться."
+            "Услуга «Углубленный разбор» активирована.\n"
+            "Опишите, пожалуйста, вашу ситуацию максимально подробно: факты, даты, документы, с кем спор, чего хотите добиться.",
+            reply_markup=kb_main_button(),
         )
     elif payload == "doc_compose":
         u["service"] = "doc_compose_wait_format"
@@ -571,29 +836,43 @@ async def paid(message: Message):
             "Пришлите документ для проверки:\n"
             "• текстом (скопируйте в сообщение), или\n"
             "• файлом PDF / DOCX / TXT.\n"
-            "Если отправите фото документа, я попрошу вас отправить текст вручную."
+            "Если отправите фото документа, я попрошу вас отправить текст вручную.",
+            reply_markup=kb_main_button(),
         )
     elif payload == "plan":
         u["service"] = "plan"
         await message.answer(
             "Оплата прошла.\n"
-            "Опишите подробно вашу ситуацию, а я подготовлю для вас пошаговый план действий."
+            "Опишите подробно вашу ситуацию, а я подготовлю для вас пошаговый план действий.",
+            reply_markup=kb_main_button(),
         )
     elif payload == "full_support":
         u["consult_active"] = True
+        u["case_mode"] = "full"
+        u["case_summary"] = None
         await message.answer(
             "Полное сопровождение дела активировано.\n"
-            "Опишите подробно вашу ситуацию. Я буду помогать вам формировать стратегию и дальше по ходу дела."
+            "Опишите подробно вашу ситуацию. Я буду помогать вам формировать стратегию и дальше по ходу дела.",
+            reply_markup=kb_main_button(),
         )
     elif payload == "pack5":
         u["paid_left"] += 5
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 5 сообщений.")
+        await message.answer(
+            "Оплата прошла. К вашему лимиту добавлено 5 сообщений.",
+            reply_markup=kb_main_button(),
+        )
     elif payload == "pack10":
         u["paid_left"] += 10
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 10 сообщений.")
+        await message.answer(
+            "Оплата прошла. К вашему лимиту добавлено 10 сообщений.",
+            reply_markup=kb_main_button(),
+        )
     elif payload == "pack20":
         u["paid_left"] += 20
-        await message.answer("Оплата прошла. К вашему лимиту добавлено 20 сообщений.")
+        await message.answer(
+            "Оплата прошла. К вашему лимиту добавлено 20 сообщений.",
+            reply_markup=kb_main_button(),
+        )
 
 
 @dp.message(F.document)
@@ -604,7 +883,8 @@ async def doc_message(message: Message):
     if u["service"] != "doc_check":
         await message.answer(
             "Сейчас проверка документа не активирована.\n"
-            "Если хотите проверить документ, выберите услугу «Проверить документ» в меню и оплатите её."
+            "Если хотите проверить документ, выберите услугу «Проверить документ» в каталоге услуг и оплатите её.",
+            reply_markup=kb_main_button(),
         )
         return
 
@@ -618,13 +898,14 @@ async def doc_message(message: Message):
         await message.answer(
             "Не удалось прочитать текст из файла.\n"
             "Поддерживаются форматы: PDF, DOCX, TXT.\n"
-            "Попробуйте отправить документ в одном из этих форматов или скопируйте текст в сообщение."
+            "Попробуйте отправить документ в одном из этих форматов или скопируйте текст в сообщение.",
+            reply_markup=kb_main_button(),
         )
         return
 
     ans = await ask_doc_check(text)
     u["service"] = None
-    await message.answer(ans, reply_markup=kb_menu())
+    await message.answer(ans, reply_markup=kb_main_button())
 
 
 @dp.message(F.photo)
@@ -635,11 +916,13 @@ async def photo_message(message: Message):
     if u["service"] == "doc_check":
         await message.answer(
             "Пока я не умею надёжно читать текст с фото.\n"
-            "Пожалуйста, отправьте документ в виде текста или файла PDF / DOCX / TXT."
+            "Пожалуйста, отправьте документ в виде текста или файла PDF / DOCX / TXT.",
+            reply_markup=kb_main_button(),
         )
     else:
         await message.answer(
-            "Если хотите проверить документ, сначала выберите услугу «Проверить документ» в меню и оплатите её."
+            "Если хотите проверить документ, сначала выберите услугу «Проверить документ» в каталоге услуг и оплатите её.",
+            reply_markup=kb_main_button(),
         )
 
 
@@ -653,7 +936,6 @@ async def msg(message: Message):
 
     if u["service"] == "doc_compose":
         ans = await ask_doc_compose(text)
-
         await message.answer(ans)
 
         fmt = u.get("doc_format") or "docx"
@@ -675,45 +957,55 @@ async def msg(message: Message):
 
         u["service"] = None
         u["doc_format"] = None
-        await message.answer("Если нужно, вы можете заказать другие услуги:", reply_markup=kb_menu())
+        await message.answer(
+            "Если нужно, вы можете воспользоваться другими услугами.",
+            reply_markup=kb_main_button(),
+        )
         return
 
     if u["service"] == "doc_check":
         ans = await ask_doc_check(text)
         u["service"] = None
-        await message.answer(ans, reply_markup=kb_menu())
+        await message.answer(ans, reply_markup=kb_main_button())
         return
 
     if u["service"] == "plan":
         ans = await ask_plan_actions(text)
         u["service"] = None
-        await message.answer(ans, reply_markup=kb_menu())
+        await message.answer(ans, reply_markup=kb_main_button())
         return
 
-    if u["consult_active"]:
-        ans = await ask_full_support(text)
-        await message.answer(
-            ans,
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"Составить документ по этой ситуации — {PRICE_DOC_COMPOSE} ₽",
-                            callback_data="buy_doc_compose"
-                        )
-                    ],
-                    [InlineKeyboardButton(text="Пакеты сообщений", callback_data="menu")],
-                ]
-            ),
-        )
+    if u["service"] == "deep":
+        ans = await ask_individual_consult(text)
+        u["service"] = None
+        await message.answer(ans, reply_markup=kb_main_button())
+        return
+
+    if u["consult_active"] and u.get("case_mode") == "full":
+        if not u.get("case_summary"):
+            u["case_summary"] = text
+        else:
+            if not is_same_case(text, u["case_summary"]):
+                await message.answer(
+                    "Сейчас у вас активна услуга «Полное сопровождение дела» по ранее описанной ситуации.\n"
+                    "Это сообщение похоже на новый вопрос по другому делу.\n\n"
+                    "В рамках текущего сопровождения я отвечаю только по одному делу.\n"
+                    "Если это всё-таки связано с тем же делом — поясните, как именно. "
+                    "Для нового дела потребуется оформить новую услугу.",
+                    reply_markup=kb_main_button(),
+                )
+                return
+
+        ans = await ask_full_support(text, u.get("case_summary"))
+        await message.answer(ans, reply_markup=kb_full_support())
         return
 
     if u["free_left"] + u["paid_left"] <= 0:
         await message.answer(
             "Ваш бесплатный и оплаченный лимит сообщений исчерпан.\n"
             "Бесплатный лимит обновится через сутки.\n"
-            "Вы можете пополнить сообщения в меню.",
-            reply_markup=kb_menu(),
+            "Вы можете пополнить сообщения в разделе «Пакеты сообщений».",
+            reply_markup=kb_main_button(),
         )
         return
 
@@ -728,7 +1020,7 @@ async def msg(message: Message):
         f"{ans}\n\n"
         f"Бесплатных сообщений на сегодня: {u['free_left']}\n"
         f"Оплаченных сообщений: {u['paid_left']}",
-        reply_markup=kb_with_doc_offer(),
+        reply_markup=kb_main_button(),
     )
 
 
@@ -738,6 +1030,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
