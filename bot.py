@@ -3,9 +3,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
+import re
 
-import openai
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -19,10 +20,7 @@ from aiogram.types import (
 )
 
 from docx import Document
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 import PyPDF2
-import re
 
 load_dotenv()
 
@@ -30,7 +28,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN")
 
-openai.api_key = OPENAI_API_KEY
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -87,14 +85,12 @@ def reset_limits(user_id: int):
 
 
 async def ask_model(messages: list) -> str:
-    def _call():
-        return openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.2,
-        )
-    r = await asyncio.to_thread(_call)
-    return r["choices"][0]["message"]["content"].strip()
+    resp = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content.strip()
 
 
 async def ask_short_consult(text: str) -> str:
@@ -333,9 +329,10 @@ def kb_full_support():
     )
 
 
-async def create_invoice(chat_id, title, description, payload, amount_rub):
-    amount_cents = int(round(amount_rub * 100))
+async def create_invoice(chat_id, title, description, payload, amount_rub: int):
+    amount_cents = amount_rub * 100
     prices = [LabeledPrice(label=title, amount=amount_cents)]
+
     await bot.send_invoice(
         chat_id=chat_id,
         title=title,
@@ -355,21 +352,6 @@ def make_docx_file(text: str, uid: int) -> str:
         doc.add_paragraph(line)
     filename = f"document_{uid}_{int(datetime.now().timestamp())}.docx"
     doc.save(filename)
-    return filename
-
-
-def make_pdf_file(text: str, uid: int) -> str:
-    filename = f"document_{uid}_{int(datetime.now().timestamp())}.pdf"
-    c = canvas.Canvas(filename, pagesize=A4)
-    width, height = A4
-    y = height - 40
-    for line in text.split("\n"):
-        c.drawString(40, y, line)
-        y -= 14
-        if y < 40:
-            c.showPage()
-            y = height - 40
-    c.save()
     return filename
 
 
@@ -972,6 +954,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
