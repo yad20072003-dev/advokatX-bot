@@ -56,7 +56,6 @@ users = defaultdict(
         "last_reset": datetime.now(),
         "consult_active": False,
         "service": None,
-        "doc_format": None,
         "case_mode": None,
         "case_summary": None,
     }
@@ -779,7 +778,6 @@ async def paid(message: Message):
         )
     elif payload == "doc_compose":
         u["service"] = "doc_compose"
-        u["doc_format"] = "docx"
         await message.answer(
             "Оплата прошла.\n"
             "Опишите подробно вашу ситуацию и укажите, какой документ вы хотите получить (претензия, заявление, иск и т.п.).",
@@ -899,7 +897,6 @@ async def msg(message: Message):
             caption="Ваш документ в формате DOCX.",
         )
         u["service"] = None
-        u["doc_format"] = None
         await message.answer(
             "Если нужно, вы можете воспользоваться другими услугами.",
             reply_markup=kb_main_button(),
@@ -975,6 +972,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
