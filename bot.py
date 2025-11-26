@@ -42,7 +42,7 @@ PRICE_PACK5 = 75
 PRICE_PACK10 = 129
 PRICE_PACK20 = 239
 
-PRICE_DOC_COMPOSE = 50
+PRICE_DOC_COMPOSE = 75   # <<< изменено с 50 на 75
 PRICE_DOC_CHECK = 99
 PRICE_PLAN = 149
 PRICE_FULL_SUPPORT = 299
@@ -893,6 +893,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
